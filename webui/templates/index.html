@@ -1,0 +1,832 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>DeepLiveCam RunPod WebUI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <div>
+      <h1>DeepLiveCam RunPod WebUI</h1>
+      <div class="subtitle">OBS webcam -> RTMP live/test -> GPU face swap -> RTMP live/processed -> OBS Media Source</div>
+    </div>
+    <div class="notice">Use only images with consent. Do not expose this panel publicly without password. Basic Auth uses user <b>admin</b> and the <b>WEBUI_PASSWORD</b> environment variable.</div>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <div class="card-header">
+      <h2>Runtime Status</h2>
+      <span id="lastRefresh" class="badge neutral">Refreshing...</span>
+    </div>
+    <div class="grid-status">
+      <div class="status-tile">
+        <div class="status-title">MediaMTX</div>
+        <div id="stMedia" class="status-value">...</div>
+        <div id="stMediaDetail" class="status-detail"></div>
+      </div>
+      <div class="status-tile">
+        <div class="status-title">Processing</div>
+        <div id="stProcessing" class="status-value">...</div>
+        <div id="stProcessingDetail" class="status-detail"></div>
+      </div>
+      <div class="status-tile">
+        <div class="status-title">Source Face</div>
+        <div id="stSource" class="status-value">...</div>
+        <div id="stSourceDetail" class="status-detail"></div>
+      </div>
+      <div class="status-tile">
+        <div class="status-title">OBS Input</div>
+        <div id="stObsInput" class="status-value">...</div>
+        <div id="stObsInputDetail" class="status-detail">live/test</div>
+      </div>
+      <div class="status-tile">
+        <div class="status-title">Processed Output</div>
+        <div id="stProcessed" class="status-value">...</div>
+        <div id="stProcessedDetail" class="status-detail">live/processed</div>
+      </div>
+      <div class="status-tile">
+        <div class="status-title">GPU</div>
+        <div id="stGpu" class="status-value">...</div>
+        <div id="stGpuDetail" class="status-detail"></div>
+      </div>
+    </div>
+    <div id="obsWarning" class="notice warn" style="display:none; margin-top:12px;">Сначала запустите Streaming в OBS: OBS Input сейчас Offline.</div>
+  </section>
+
+  <section class="two-col">
+    <div class="card">
+      <div class="card-header">
+        <h2>Quick Start</h2>
+        <span class="badge neutral">Run order</span>
+      </div>
+      <ol class="quick-list">
+        <li>Start MediaMTX.</li>
+        <li>В OBS указать Stream Server: <span class="copy-inline">rtmp://.../live</span>.</li>
+        <li>Stream Key: <span class="copy-inline">test</span>.</li>
+        <li>Запустить Start Streaming в OBS.</li>
+        <li>Проверить, что OBS Input = Online.</li>
+        <li>Загрузить Source Face и нажать Check Face.</li>
+        <li>Нажать Start Processing.</li>
+        <li>В OBS Media Source открыть <span class="copy-inline">rtmp://.../live/processed</span>.</li>
+        <li>Для OBS Virtual Camera использовать сцену с live/processed.</li>
+      </ol>
+      <div class="notice warn" style="margin-top:12px;">
+        Не отправляйте сцену с live/processed обратно на RunPod, иначе получится видеопетля.
+        Для теста лучше: OBS #1 отправляет webcam, OBS #2 или отдельная сцена принимает live/processed.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>OBS Connection</h2>
+        <button class="secondary" onclick="saveConfig()">Save OBS URL</button>
+      </div>
+      <label for="external_rtmp_base">External RTMP base</label>
+      <input id="external_rtmp_base" placeholder="rtmp://EXTERNAL_IP:EXTERNAL_PORT">
+      <div class="three-col" style="margin-top:12px;">
+        <div>
+          <label>OBS Stream Server</label>
+          <div id="obs_server" class="copybox">...</div>
+        </div>
+        <div>
+          <label>OBS Stream Key</label>
+          <div id="obs_key" class="copybox">test</div>
+        </div>
+        <div>
+          <label>OBS Media Source Result</label>
+          <div id="obs_processed" class="copybox">...</div>
+        </div>
+      </div>
+      <div class="button-row" style="margin-top:12px;">
+        <button class="secondary" onclick="copyText('obs_server')">Copy Server</button>
+        <button class="secondary" onclick="copyText('obs_key')">Copy Key</button>
+        <button class="secondary" onclick="copyText('obs_processed')">Copy Processed URL</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2>Active Source Face</h2>
+      <span id="sourceBadge" class="badge neutral">Checking...</span>
+    </div>
+    <div class="source-layout">
+      <div>
+        <div class="preview-grid">
+          <div>
+            <h3>Current source.jpg</h3>
+            <div class="preview-box">
+              <img id="sourceImg" alt="Current source face" style="display:none;">
+              <div id="sourceEmpty" class="empty-preview">source.jpg is missing</div>
+            </div>
+          </div>
+          <div>
+            <h3>Annotated preview</h3>
+            <div class="preview-box">
+              <img id="annotatedImg" alt="Annotated source face" style="display:none;">
+              <div id="annotatedEmpty" class="empty-preview">Run Check Face to create preview</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div id="sourceMeta" class="meta-grid"></div>
+        <div id="sourceAdvice" class="notice warn" style="display:none;"></div>
+        <div class="button-row" style="margin-top:12px;">
+          <input type="file" id="sourceFile" name="file" accept="image/*">
+          <button class="good" onclick="document.getElementById('sourceFile').click()">Upload / Replace source face</button>
+          <button class="secondary" onclick="checkSource()">Check face</button>
+          <button class="danger" onclick="deleteSource()">Delete source face</button>
+        </div>
+        <p class="note">Файл активного лица: /workspace/Deep-Live-Cam/realtime/source.jpg</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2>Processing Controls</h2>
+      <span id="settingsState" class="badge neutral">Config</span>
+    </div>
+    <div class="button-row" style="margin-bottom:14px;">
+      <button id="startMediaBtn" class="good" onclick="startMediaMTX()">Start MediaMTX</button>
+      <button id="stopMediaBtn" class="danger" onclick="stopMediaMTX()">Stop MediaMTX</button>
+      <button id="startProcessingBtn" class="good" onclick="startProcessing()">Start Processing</button>
+      <button id="stopProcessingBtn" class="danger" onclick="stopProcessing()">Stop Processing</button>
+      <button id="restartProcessingBtn" class="warning" onclick="restartProcessing()">Restart Processing</button>
+    </div>
+    <h3>Presets</h3>
+    <div class="preset-row">
+       <button class="secondary" onclick="applyPreset('fast_720p_realtime')">
+         Fast 720p realtime<br>
+         <span class="hint">1280x720, 30 FPS, detect 8</span>
+       </button>
+    
+       <button class="secondary" onclick="applyPreset('fast_720p_60_experimental')">
+         Fast 720p 60 FPS<br>
+         <span class="hint">experimental, OBS must send 60 FPS</span>
+       </button>
+    
+       <button class="secondary" onclick="applyPreset('light_480p_realtime')">
+         Light 480p realtime<br>
+         <span class="hint">854x480, 30 FPS, low CPU</span>
+       </button>
+    
+       <button class="secondary" onclick="applyPreset('gfpgan_480p_quality')">
+         GFPGAN 480p quality<br>
+         <span class="hint">854x480, 15 FPS, enhancer every frame</span>
+       </button>
+    
+       <button class="secondary" onclick="applyPreset('gfpgan_480p_balanced')">
+         GFPGAN 480p balanced<br>
+         <span class="hint">854x480, 20 FPS, enhancer every 2</span>
+       </button>
+    
+       <button class="secondary danger-soft" onclick="applyPreset('gfpgan_720p_experimental')">
+         GFPGAN 720p experimental<br>
+         <span class="hint">quality test only, not realtime</span>
+       </button>
+    </div>
+    <div class="settings-grid">
+      <div>
+        <label for="mode">Mode</label>
+        <select id="mode">
+          <option value="fast">Fast</option>
+          <option value="gfpgan">GFPGAN</option>
+        </select>
+        <div class="hint">Fast — максимальный FPS, только face_swapper. GFPGAN — качество выше, FPS может быть ниже.</div>
+      </div>
+      <div>
+        <label for="width">Width</label>
+        <input id="width" type="number" min="1" value="1280">
+      </div>
+      <div>
+        <label for="height">Height</label>
+        <input id="height" type="number" min="1" value="720">
+      </div>
+      <div>
+        <label for="fps">FPS</label>
+        <input id="fps" type="number" min="1" max="60" value="30">
+      </div>
+      <div>
+        <label for="bitrate">Bitrate</label>
+        <input id="bitrate" value="3000k">
+        <div class="hint">Bitrate влияет на качество RTMP-выхода.</div>
+      </div>
+      <div>
+        <label for="every_n">Every N</label>
+        <input id="every_n" type="number" min="1" value="1">
+        <div class="hint">Обрабатывать каждый N-й кадр; помогает при просадках FPS.</div>
+      </div>
+      <div>
+        <label for="detect_every">Detect every N frames</label>
+        <input id="detect_every" type="number" min="1" value="3">
+        <div class="hint">Face detection interval. До первого найденного лица поиск идёт каждый кадр.</div>
+      </div>
+      <div>
+        <label for="enhancer_every">Enhancer every N frames</label>
+        <input id="enhancer_every" type="number" min="1" value="1">
+        <div class="hint">GFPGAN interval. Промежуточные кадры идут после face swap без enhancer.</div>
+      </div>
+    </div>
+    <div class="button-row" style="margin-top:14px;">
+      <button class="secondary" onclick="saveConfig()">Save Settings</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2>Diagnostics</h2>
+      <span id="diagUpdated" class="badge neutral">Not run yet</span>
+    </div>
+    <div class="diag-grid">
+      <button class="secondary" onclick="runCheck('gpu')">Check GPU</button>
+      <button class="secondary" onclick="runCheck('deps')">Check Python deps</button>
+      <button class="secondary" onclick="runCheck('source')">Check Source Face</button>
+      <button class="secondary" onclick="runCheck('port')">Check MediaMTX port</button>
+      <button class="secondary" onclick="runCheck('obs_input')">Check OBS input live/test</button>
+      <button class="secondary" onclick="runCheck('processed_output')">Check processed output live/processed</button>
+      <button class="good" onclick="runCheck('all')">Check all</button>
+    </div>
+    <div id="diagResults" class="diag-results">
+      <div class="notice">Нажмите Check all или отдельную проверку, чтобы увидеть результат.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2>Logs</h2>
+      <div class="tabs">
+        <button id="tab-processing" class="active" onclick="setLogTab('processing')">DeepLiveCam log</button>
+        <button id="tab-mediamtx" onclick="setLogTab('mediamtx')">MediaMTX log</button>
+        <button id="tab-webui" onclick="setLogTab('webui')">WebUI log</button>
+        <button id="tab-diagnostics" onclick="setLogTab('diagnostics')">Diagnostics</button>
+      </div>
+    </div>
+    <div class="log-toolbar">
+      <div id="logSummary" class="log-summary"></div>
+      <div class="button-row">
+        <button id="pauseLogsBtn" class="secondary" onclick="toggleLogPause()">Pause auto-refresh</button>
+        <button class="secondary" onclick="copyCurrentLog()">Copy log</button>
+        <button class="secondary" onclick="clearDisplayedLog()">Clear displayed log</button>
+      </div>
+    </div>
+    <div id="logView" class="log-view"></div>
+  </section>
+</main>
+
+<script>
+const PRESETS = {
+    fast_720p_realtime: {
+      width: 1280,
+      height: 720,
+      fps: 30,
+      bitrate: "3000k",
+      every_n: 1,
+      detect_every: 8,
+      enhancer_every: 1,
+      flush_every: 3,
+      enhancer: false,
+      profile_stages: false
+    },
+
+    fast_720p_60_experimental: {
+      width: 1280,
+      height: 720,
+      fps: 60,
+      bitrate: "4500k",
+      every_n: 2,
+      detect_every: 10,
+      enhancer_every: 1,
+      flush_every: 3,
+      enhancer: false,
+      profile_stages: false
+    },
+
+    light_480p_realtime: {
+      width: 854,
+      height: 480,
+      fps: 30,
+      bitrate: "1800k",
+      every_n: 1,
+      detect_every: 8,
+      enhancer_every: 1,
+      flush_every: 3,
+      enhancer: false,
+      profile_stages: false
+    },
+
+    gfpgan_480p_quality: {
+      width: 854,
+      height: 480,
+      fps: 15,
+      bitrate: "1800k",
+      every_n: 1,
+      detect_every: 5,
+      enhancer_every: 1,
+      flush_every: 3,
+      enhancer: true,
+      profile_stages: false
+    },
+
+    gfpgan_480p_balanced: {
+      width: 854,
+      height: 480,
+      fps: 20,
+      bitrate: "2000k",
+      every_n: 1,
+      detect_every: 5,
+      enhancer_every: 2,
+      flush_every: 3,
+      enhancer: true,
+      profile_stages: false
+    },
+
+    gfpgan_720p_experimental: {
+      width: 1280,
+      height: 720,
+      fps: 10,
+      bitrate: "3500k",
+      every_n: 1,
+      detect_every: 5,
+      enhancer_every: 1,
+      flush_every: 3,
+      enhancer: true,
+      profile_stages: true
+    }
+};
+
+let lastStatus = null;
+let logs = { processing: "", mediamtx: "", webui: "", diagnostics: "" };
+let currentLogTab = "processing";
+let logsPaused = false;
+let clearedLogTab = null;
+let configLoaded = false;
+
+async function api(path, options = {}) {
+  const response = await fetch(path, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = data.message || data.detail || "Request failed";
+    showSettingsState(message, "bad");
+    throw new Error(message);
+  }
+  return data;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value ?? "";
+}
+
+function setClassText(id, value, cls) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = "status-value " + (cls || "");
+  el.textContent = value;
+}
+
+function statusClass(ok, warn = false) {
+  if (warn) return "warn-text";
+  return ok ? "ok" : "bad";
+}
+
+function badge(text, cls = "neutral") {
+  return `<span class="badge ${cls}">${escapeHtml(text)}</span>`;
+}
+
+function copyText(id) {
+  const value = document.getElementById(id)?.textContent || "";
+  navigator.clipboard?.writeText(value);
+}
+
+function getFormConfig() {
+  return {
+    external_rtmp_base: document.getElementById("external_rtmp_base").value.trim(),
+    width: Number(document.getElementById("width").value),
+    height: Number(document.getElementById("height").value),
+    fps: Number(document.getElementById("fps").value),
+    bitrate: document.getElementById("bitrate").value.trim(),
+    every_n: Number(document.getElementById("every_n").value),
+    detect_every: Number(document.getElementById("detect_every").value),
+    enhancer_every: Number(document.getElementById("enhancer_every").value),
+    mode: document.getElementById("mode").value
+  };
+}
+
+function validateClientConfig(config) {
+  const errors = [];
+  if (!Number.isFinite(config.width) || config.width <= 0) errors.push("width должен быть больше 0");
+  if (!Number.isFinite(config.height) || config.height <= 0) errors.push("height должен быть больше 0");
+  if (!Number.isFinite(config.fps) || config.fps < 1 || config.fps > 60) errors.push("fps должен быть 1-60");
+  if (!Number.isFinite(config.every_n) || config.every_n < 1) errors.push("every_n должен быть >= 1");
+  if (!Number.isFinite(config.detect_every) || config.detect_every < 1) errors.push("detect_every должен быть >= 1");
+  if (!Number.isFinite(config.enhancer_every) || config.enhancer_every < 1) errors.push("enhancer_every должен быть >= 1");
+  if (!/^[1-9][0-9]*[kKmM]$/.test(config.bitrate)) errors.push("bitrate должен выглядеть как 3000k");
+  if (!["fast", "gfpgan"].includes(config.mode)) errors.push("mode должен быть fast или gfpgan");
+  return errors;
+}
+
+function fillConfig(config) {
+  if (!config) return;
+  document.getElementById("external_rtmp_base").value = config.external_rtmp_base || "";
+  document.getElementById("width").value = config.width ?? 1280;
+  document.getElementById("height").value = config.height ?? 720;
+  document.getElementById("fps").value = config.fps ?? 30;
+  document.getElementById("bitrate").value = config.bitrate || "3000k";
+  document.getElementById("every_n").value = config.every_n ?? 1;
+  document.getElementById("detect_every").value = config.detect_every ?? 3;
+  document.getElementById("enhancer_every").value = config.enhancer_every ?? 1;
+  document.getElementById("mode").value = config.mode || "fast";
+}
+
+function fillObs(obs) {
+  setText("obs_server", obs?.server || "...");
+  setText("obs_key", obs?.stream_key || "test");
+  setText("obs_processed", obs?.processed || "...");
+}
+
+function showSettingsState(text, cls = "neutral") {
+  const el = document.getElementById("settingsState");
+  el.className = "badge " + cls;
+  el.textContent = text;
+}
+
+async function saveConfig() {
+  const config = getFormConfig();
+  const errors = validateClientConfig(config);
+  if (errors.length) {
+    showSettingsState(errors.join("; "), "bad");
+    return false;
+  }
+  const body = new FormData();
+  Object.entries(config).forEach(([key, value]) => body.append(key, value));
+  const data = await api("/api/config", { method: "POST", body });
+  fillConfig(data.config);
+  fillObs(data.obs);
+  showSettingsState("Saved", "ok");
+  refreshStatus();
+  return true;
+}
+
+// async function applyPreset(name) {
+//   const preset = PRESETS[name];
+//   if (!preset) return;
+//   document.getElementById("width").value = preset.width;
+//   document.getElementById("height").value = preset.height;
+//   document.getElementById("fps").value = preset.fps;
+//   document.getElementById("bitrate").value = preset.bitrate;
+//   document.getElementById("every_n").value = preset.every_n;
+//   document.getElementById("detect_every").value = preset.detect_every;
+//   document.getElementById("enhancer_every").value = preset.enhancer_every;
+//   document.getElementById("mode").value = preset.mode || (preset.enhancer ? "gfpgan" : "fast");
+//   await saveConfig();
+// }
+
+async function applyPreset(name) {
+  const preset = PRESETS[name];
+  if (!preset) {
+    console.warn("Unknown preset:", name);
+    return;
+  }
+
+  setValue("width", preset.width);
+  setValue("height", preset.height);
+  setValue("fps", preset.fps);
+  setValue("bitrate", preset.bitrate);
+  setValue("every_n", preset.every_n);
+  setValue("detect_every", preset.detect_every);
+  setValue("enhancer_every", preset.enhancer_every);
+  setValue("flush_every", preset.flush_every ?? 3);
+
+  // mode важнее, чем enhancer: backend может по mode понять fast/gfpgan
+  setValue("mode", preset.mode || (preset.enhancer ? "gfpgan" : "fast"));
+
+  // Если есть отдельные checkbox/поля — тоже синхронизируем.
+  setChecked("enhancer", Boolean(preset.enhancer));
+  setChecked("profile_stages", Boolean(preset.profile_stages));
+
+  await saveConfig();
+}
+
+function setValue(id, value) {
+  const el = document.getElementById(id);
+  if (!el || value === undefined || value === null) return;
+  el.value = value;
+}
+
+function setChecked(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.checked = Boolean(value);
+}
+
+function renderSource(source) {
+  const src = source || {};
+  const ready = Boolean(src.ready);
+  const missing = !src.exists;
+  const invalid = src.exists && !ready;
+  const cache = src.cache_key || Date.now();
+
+  const sourceBadge = document.getElementById("sourceBadge");
+  sourceBadge.className = "badge " + (ready ? "ok" : missing ? "warn" : "bad");
+  sourceBadge.textContent = ready ? "Ready" : missing ? "Missing" : "Invalid";
+
+  const sourceImg = document.getElementById("sourceImg");
+  const sourceEmpty = document.getElementById("sourceEmpty");
+  if (src.exists) {
+    sourceImg.src = `/api/source-image?v=${encodeURIComponent(cache)}`;
+    sourceImg.style.display = "block";
+    sourceEmpty.style.display = "none";
+  } else {
+    sourceImg.removeAttribute("src");
+    sourceImg.style.display = "none";
+    sourceEmpty.style.display = "block";
+  }
+
+  const annotatedImg = document.getElementById("annotatedImg");
+  const annotatedEmpty = document.getElementById("annotatedEmpty");
+  if (src.annotated_exists) {
+    annotatedImg.src = `/api/source-annotated-image?v=${encodeURIComponent(cache)}`;
+    annotatedImg.style.display = "block";
+    annotatedEmpty.style.display = "none";
+  } else {
+    annotatedImg.removeAttribute("src");
+    annotatedImg.style.display = "none";
+    annotatedEmpty.style.display = "block";
+    annotatedEmpty.textContent = ready ? "Face found, but bbox is unavailable" : "Run Check Face to create preview";
+  }
+
+  const meta = [
+    ["Status", src.status || "Missing"],
+    ["Modified", src.mtime_label || "-"],
+    ["File size", src.size_label || "-"],
+    ["Image size", src.image_size || "-"],
+    ["Face check", src.face_found ? "Found" : "Not found"],
+    ["Faces", src.face_count ?? "-"]
+  ];
+  document.getElementById("sourceMeta").innerHTML = meta.map(([label, value]) => `
+    <div class="meta-item">
+      <div class="meta-label">${escapeHtml(label)}</div>
+      <div class="meta-value">${escapeHtml(value)}</div>
+    </div>
+  `).join("");
+
+  const advice = document.getElementById("sourceAdvice");
+  if (invalid || missing) {
+    advice.style.display = "block";
+    advice.textContent = src.advice || "Лицо не найдено. Используйте фото крупнее, лучше свет, фронтальный ракурс.";
+  } else {
+    advice.style.display = "none";
+    advice.textContent = "";
+  }
+}
+
+async function uploadSource(file) {
+  if (!file) return;
+  const body = new FormData();
+  body.append("file", file);
+  await api("/api/upload-source", { method: "POST", body });
+  await refreshStatus(true);
+  await refreshLogs();
+}
+
+async function checkSource() {
+  const data = await api("/api/check-source", { method: "POST" });
+  renderSource(data);
+  await refreshStatus(true);
+}
+
+async function deleteSource() {
+  if (!confirm("Delete current source.jpg?")) return;
+  await api("/api/delete-source", { method: "POST" });
+  await refreshStatus(true);
+}
+
+async function startMediaMTX() {
+  await api("/api/start-mediamtx", { method: "POST" });
+  await refreshStatus(true);
+}
+
+async function stopMediaMTX() {
+  await api("/api/stop-mediamtx", { method: "POST" });
+  await refreshStatus(true);
+}
+
+async function startProcessing() {
+  if (!(await saveConfig())) return;
+  await api("/api/start-processing", { method: "POST" });
+  await refreshStatus(true);
+  await refreshLogs();
+}
+
+async function stopProcessing() {
+  await api("/api/stop-processing", { method: "POST" });
+  await refreshStatus(true);
+}
+
+async function restartProcessing() {
+  if (!(await saveConfig())) return;
+  await api("/api/restart-processing", { method: "POST" });
+  await refreshStatus(true);
+  await refreshLogs();
+}
+
+function updateButtons(status) {
+  const mediaRunning = Boolean(status.mediamtx_running);
+  const processingRunning = Boolean(status.processing_running);
+  const sourceReady = Boolean(status.source?.ready);
+
+  document.getElementById("startMediaBtn").disabled = mediaRunning;
+  document.getElementById("stopMediaBtn").disabled = !mediaRunning;
+  document.getElementById("startProcessingBtn").disabled = processingRunning || !sourceReady || !mediaRunning;
+  document.getElementById("stopProcessingBtn").disabled = !processingRunning;
+  document.getElementById("restartProcessingBtn").disabled = !processingRunning;
+}
+
+function renderRuntimeStatus(status) {
+  setClassText("stMedia", status.mediamtx_running ? "Running" : "Stopped", statusClass(status.mediamtx_running));
+  setText("stMediaDetail", status.listener_1935 ? "Port 1935 listening" : "Port 1935 closed");
+
+  setClassText("stProcessing", status.processing_running ? "Running" : "Stopped", statusClass(status.processing_running));
+  const fps = status.last_fps ? `${status.last_fps.toFixed(1)} FPS` : "No FPS yet";
+  setText("stProcessingDetail", `${fps}; errors: ${status.errors ?? 0}; detect: ${status.detect_every ?? "-"}; enhancer: ${status.enhancer_every ?? "-"}`);
+
+  const source = status.source || {};
+  const sourceCls = source.ready ? "ok" : source.exists ? "bad" : "warn-text";
+  setClassText("stSource", source.status || "Missing", sourceCls);
+  setText("stSourceDetail", source.face_found ? `faces: ${source.face_count ?? 1}` : source.message || "source.jpg missing");
+
+  setClassText("stObsInput", status.obs_input_online ? "Online" : "Offline", statusClass(status.obs_input_online));
+  setText("stObsInputDetail", "live/test");
+
+  setClassText("stProcessed", status.processed_output_online ? "Online" : "Offline", statusClass(status.processed_output_online));
+  setText("stProcessedDetail", status.processed_viewer_online ? "viewer connected" : "no viewer");
+
+  const gpu = status.gpu || {};
+  setClassText("stGpu", gpu.ok ? "OK" : "Problem", statusClass(gpu.ok));
+  const gpuDetail = gpu.name ? `${gpu.name}; ${gpu.util || 0}% GPU; ${gpu.memory_used || "?"}/${gpu.memory_total || "?"} MB` : (gpu.raw || "No GPU info");
+  setText("stGpuDetail", gpuDetail);
+
+  const warning = document.getElementById("obsWarning");
+  warning.style.display = status.mediamtx_running && !status.obs_input_online ? "block" : "none";
+}
+
+async function refreshStatus(force = false) {
+  try {
+    const status = await api("/api/status");
+    lastStatus = status;
+    if (force || !configLoaded) {
+      fillConfig(status.config);
+      configLoaded = true;
+    }
+    fillObs(status.obs);
+    renderRuntimeStatus(status);
+    renderSource(status.source);
+    updateButtons(status);
+    const refresh = document.getElementById("lastRefresh");
+    refresh.className = "badge ok";
+    refresh.textContent = "Updated " + new Date().toLocaleTimeString();
+  } catch (error) {
+    const refresh = document.getElementById("lastRefresh");
+    refresh.className = "badge bad";
+    refresh.textContent = "Status error";
+  }
+}
+
+function classifyLogLine(line) {
+  if (/(traceback|failed|\\berror\\b|exception)/i.test(line)) return "error";
+  if (/(warning|too many reordered frames|reader is too slow)/i.test(line)) return "warning";
+  if (/(CUDAExecutionProvider|avg_out_fps|proc_fps|FPS|stream is available|is publishing to path)/i.test(line)) return "good";
+  return "";
+}
+
+function renderLog() {
+  const view = document.getElementById("logView");
+  const text = clearedLogTab === currentLogTab ? "" : (logs[currentLogTab] || "");
+  if (!text) {
+    view.innerHTML = `<span class="log-line">No displayed log lines.</span>`;
+    return;
+  }
+  view.innerHTML = text.split("\\n").map(line => {
+    const cls = classifyLogLine(line);
+    return `<span class="log-line ${cls}">${escapeHtml(line) || " "}</span>`;
+  }).join("\\n");
+  view.scrollTop = view.scrollHeight;
+}
+
+function diagnosticsToText(diag) {
+  if (!diag?.items) return "";
+  const lines = diag.items.map(item => `${item.label}: ${item.ok ? "OK" : "Problem"}${item.detail ? " - " + item.detail : ""}`);
+  if (diag.raw) {
+    Object.entries(diag.raw).forEach(([key, value]) => {
+      if (value) lines.push(`\\n[${key}]\\n${value}`);
+    });
+  }
+  return lines.join("\\n");
+}
+
+function renderLogSummary(summary) {
+  const html = [
+    badge(`FPS: ${summary?.fps ? Number(summary.fps).toFixed(1) : "-"}`, summary?.fps ? "ok" : "neutral"),
+    badge(`Errors: ${summary?.errors ?? 0}`, summary?.errors ? "bad" : "ok"),
+    badge(`Detect: ${summary?.detect_every ?? "-"}`, summary?.detect_every ? "ok" : "neutral"),
+    badge(`Detections: ${summary?.detections_count ?? "-"}`, summary?.detections_count ? "ok" : "neutral"),
+    badge(`Enhancer: ${summary?.enhancer_every ?? "-"}`, summary?.enhancer_every ? "ok" : "neutral"),
+    badge(`Enhanced: ${summary?.enhancer_count ?? "-"}`, summary?.enhancer_count ? "ok" : "neutral"),
+    badge(`Provider: ${summary?.active_provider || "-"}`, summary?.active_provider?.includes("CUDA") ? "ok" : "neutral"),
+    badge(`Last update: ${summary?.last_update || "-"}`, "neutral")
+  ].join("");
+  document.getElementById("logSummary").innerHTML = html;
+}
+
+async function refreshLogs() {
+  if (logsPaused) return;
+  const data = await api("/api/logs");
+  logs.processing = data.processing || "";
+  logs.mediamtx = data.mediamtx || "";
+  logs.webui = data.webui || "";
+  logs.diagnostics = diagnosticsToText(data.diagnostics);
+  clearedLogTab = null;
+  renderLogSummary(data.summary || {});
+  renderLog();
+}
+
+function setLogTab(tab) {
+  currentLogTab = tab;
+  document.querySelectorAll(".tabs button").forEach(btn => btn.classList.remove("active"));
+  document.getElementById(`tab-${tab}`).classList.add("active");
+  renderLog();
+}
+
+function toggleLogPause() {
+  logsPaused = !logsPaused;
+  document.getElementById("pauseLogsBtn").textContent = logsPaused ? "Resume auto-refresh" : "Pause auto-refresh";
+}
+
+function copyCurrentLog() {
+  const text = clearedLogTab === currentLogTab ? "" : (logs[currentLogTab] || "");
+  navigator.clipboard?.writeText(text);
+}
+
+function clearDisplayedLog() {
+  clearedLogTab = currentLogTab;
+  renderLog();
+}
+
+function renderDiagnostics(diag) {
+  const updated = document.getElementById("diagUpdated");
+  updated.className = "badge " + (diag.ok ? "ok" : "warn");
+  updated.textContent = diag.updated_at || "Updated";
+
+  const results = document.getElementById("diagResults");
+  if (!diag.items?.length) {
+    results.innerHTML = `<div class="notice">No diagnostics returned.</div>`;
+    return;
+  }
+  results.innerHTML = diag.items.map(item => `
+    <div class="diag-item ${item.ok ? "ok" : "bad"}">
+      <div class="card-header" style="margin-bottom:6px;">
+        <h2 style="font-size:14px;">${escapeHtml(item.label)}</h2>
+        ${badge(item.ok ? "OK" : "Problem", item.ok ? "ok" : "bad")}
+      </div>
+      <div class="hint">${escapeHtml(item.detail || "")}</div>
+    </div>
+  `).join("");
+  logs.diagnostics = diagnosticsToText(diag);
+  if (currentLogTab === "diagnostics") renderLog();
+}
+
+async function runCheck(check) {
+  const body = new FormData();
+  body.append("check", check);
+  const diag = await api("/api/run-check", { method: "POST", body });
+  renderDiagnostics(diag);
+}
+
+document.getElementById("sourceFile").addEventListener("change", event => {
+  uploadSource(event.target.files?.[0]);
+  event.target.value = "";
+});
+
+refreshStatus(true);
+refreshLogs();
+setInterval(refreshStatus, 2500);
+setInterval(refreshLogs, 3000);
+</script>
+</body>
+</html>

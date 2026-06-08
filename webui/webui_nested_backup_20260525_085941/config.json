@@ -1,0 +1,9 @@
+{
+  "external_rtmp_base": "157.157.221.29:52964",
+  "width": 1280,
+  "height": 720,
+  "fps": 30,
+  "bitrate": "3000k",
+  "every_n": 1,
+  "mode": "fast"
+}

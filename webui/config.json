@@ -1,0 +1,13 @@
+{
+  "external_rtmp_base": "rtmp://157.157.221.29:52849",
+  "width": 854,
+  "height": 480,
+  "fps": 20,
+  "bitrate": "2000k",
+  "every_n": 1,
+  "detect_every": 5,
+  "enhancer_every": 2,
+  "profile_stages": false,
+  "enhancer": true,
+  "mode": "gfpgan"
+}

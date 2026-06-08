@@ -1,31 +1,45 @@
+# Python
 __pycache__/
-*.py[cod]
-*$py.class
 *.pyc
-.idea
-.todo
-*.log
-*.backup
-tf_env/
-*.png
-*.mp4
-*.mkv
-
-.tmp/
-temp/
-.venv/
+*.pyo
+*.pyd
+.ipynb_checkpoints/
 venv/
 env/
-workflow/
-gfpgan/
-models/inswapper_128.onnx
-models/GFPGANv1.4.pth
-*.onnx
-models/DMDNet.pth
-faceswap/
-.vscode/
-switch_states.json
-/models
-install.bat
-/.claude
-*.bat
+.venv/
+
+# Logs / runtime
+logs/
+webui/logs/
+streaming/logs/
+*.pid
+*.log
+
+# Backups
+backups/
+*_backup_*/
+*.bak
+*.bak_*
+*.old
+
+# Archives / temp
+*.zip
+*.tar.gz
+*.tmp
+
+# MediaMTX binary is downloaded by streaming/start_mediamtx.sh
+streaming/mediamtx
+streaming/mediamtx.tar.gz
+
+# Personal / sensitive
+.env
+*.key
+*.pem
+source.jpg
+realtime/source.jpg
+realtime/source_annotated.jpg
+webui/realtime/source.jpg
+
+# OS
+.DS_Store
+Thumbs.db
